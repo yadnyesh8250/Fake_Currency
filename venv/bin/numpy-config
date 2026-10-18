@@ -1,0 +1,6 @@
+#!/Users/yadnyesh8250/Desktop/MINI_Project_sem5/IVP_MINI_PROJECT/venv/bin/python3
+import sys
+from numpy._configtool import main
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(main())

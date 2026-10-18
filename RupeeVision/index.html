@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RupeeVision — Indian Currency Recognition & IVP Analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f1117;
+      --card-bg: rgba(26, 31, 46, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent-primary: #3b82f6;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #ef4444;
+      --accent-cyan: #06b6d4;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --font-sans: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: radial-gradient(circle at 50% 0%, #1e293b 0%, #0f1117 100%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      padding: 2rem 1.5rem 4rem;
+      line-height: 1.5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ─────────────────────────────────────────── */
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.35rem 1rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+      margin-bottom: 1rem;
+    }
+
+    h1 {
+      font-size: 2.75rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 30%, #93c5fd 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.5rem;
+    }
+
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 1.1rem;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    /* ── Controls Bar ───────────────────────────────────── */
+    .top-controls {
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+
+    .speech-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      padding: 0.4rem 0.85rem;
+      border-radius: 8px;
+    }
+
+    .speech-toggle input {
+      cursor: pointer;
+      accent-color: var(--accent-primary);
+    }
+
+    /* ── Main Grid ──────────────────────────────────────── */
+    .grid-layout {
+      display: grid;
+      grid-template-columns: 1fr 1.35fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 960px) {
+      .grid-layout {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      padding: 1.5rem;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+    }
+
+    .card-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* ── Upload & Camera Tabs ───────────────────────────── */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.25rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.3rem;
+      border-radius: 10px;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 0.6rem;
+      font-size: 0.9rem;
+      font-weight: 600;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .tab-btn.active {
+      background: var(--accent-primary);
+      color: #fff;
+    }
+
+    .dropzone {
+      border: 2px dashed rgba(255, 255, 255, 0.15);
+      border-radius: 12px;
+      padding: 2rem 1.5rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s ease, background 0.2s ease;
+      background: rgba(15, 23, 42, 0.4);
+    }
+
+    .dropzone:hover, .dropzone.dragover {
+      border-color: var(--accent-primary);
+      background: rgba(59, 130, 246, 0.05);
+    }
+
+    .dropzone-icon {
+      font-size: 2.5rem;
+      margin-bottom: 0.75rem;
+      color: #94a3b8;
+    }
+
+    .dropzone-text {
+      font-weight: 500;
+      margin-bottom: 0.25rem;
+    }
+
+    .dropzone-hint {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    /* ── Camera Preview ─────────────────────────────────── */
+    .camera-box {
+      display: none;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .camera-video {
+      width: 100%;
+      height: 240px;
+      background: #000;
+      border-radius: 12px;
+      object-fit: cover;
+      transform: scaleX(-1);
+    }
+
+    .btn-camera {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #fff;
+      padding: 0.65rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+    }
+
+    .btn-camera:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+
+    /* ── Preview Box ────────────────────────────────────── */
+    .preview-box {
+      margin-top: 1.25rem;
+      text-align: center;
+      display: none;
+    }
+
+    .preview-img {
+      max-width: 100%;
+      max-height: 220px;
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
+    .btn-analyze {
+      width: 100%;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      color: #ffffff;
+      border: none;
+      padding: 0.9rem;
+      font-size: 1rem;
+      font-weight: 700;
+      border-radius: 10px;
+      cursor: pointer;
+      margin-top: 1.25rem;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      letter-spacing: 0.02em;
+    }
+
+    .btn-analyze:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+    }
+
+    .btn-analyze:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    /* ── Results Panel ──────────────────────────────────── */
+    .result-container {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      justify-content: center;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 3rem 1rem;
+      color: var(--text-muted);
+    }
+
+    .empty-icon {
+      font-size: 3rem;
+      margin-bottom: 0.75rem;
+      opacity: 0.6;
+    }
+
+    .result-content {
+      display: none;
+    }
+
+    .denom-banner {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .denom-banner.unrecognized {
+      background: rgba(245, 158, 11, 0.1);
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
+    .denom-title {
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .denom-val {
+      font-size: 2.4rem;
+      font-weight: 800;
+      color: var(--accent-emerald);
+      letter-spacing: -0.02em;
+    }
+
+    .denom-banner.unrecognized .denom-val {
+      font-size: 1.5rem;
+      color: var(--accent-amber);
+    }
+
+    /* ── Authenticity Banner ────────────────────────────── */
+    .auth-banner {
+      border-radius: 14px;
+      padding: 1.1rem 1.4rem;
+      margin-bottom: 1.25rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 1rem;
+      border: 1px solid transparent;
+      transition: all 0.2s ease;
+    }
+
+    .auth-icon {
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .auth-title {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 700;
+      color: var(--text-muted);
+      margin-bottom: 0.2rem;
+    }
+
+    .auth-status {
+      font-size: 1.2rem;
+      font-weight: 800;
+      letter-spacing: -0.01em;
+      margin-bottom: 0.25rem;
+    }
+
+    .auth-reason {
+      font-size: 0.85rem;
+      color: #cbd5e1;
+      line-height: 1.4;
+    }
+
+    .auth-genuine {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.4);
+    }
+    .auth-genuine .auth-status {
+      color: #34d399;
+    }
+
+    .auth-specimen {
+      background: rgba(239, 68, 68, 0.15);
+      border-color: rgba(239, 68, 68, 0.5);
+    }
+    .auth-specimen .auth-status {
+      color: #f87171;
+    }
+
+    .auth-fake {
+      background: rgba(220, 38, 38, 0.2);
+      border-color: rgba(220, 38, 38, 0.5);
+    }
+    .auth-fake .auth-status {
+      color: #ef4444;
+    }
+
+    .auth-unrecognized {
+      background: rgba(245, 158, 11, 0.12);
+      border-color: rgba(245, 158, 11, 0.4);
+    }
+    .auth-unrecognized .auth-status {
+      color: #fbbf24;
+    }
+
+    .confidence-tag {
+      padding: 0.4rem 0.9rem;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+    }
+
+    .conf-high {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    .conf-mod {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+    }
+
+    .conf-none {
+      background: rgba(239, 68, 68, 0.2);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    /* ── Metrics Grid ───────────────────────────────────── */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+
+    .metric-card {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 0.85rem;
+      text-align: center;
+    }
+
+    .metric-num {
+      font-family: var(--font-mono);
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #93c5fd;
+    }
+
+    .metric-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.2rem;
+    }
+
+    .evidence-box {
+      background: rgba(15, 23, 42, 0.5);
+      border-left: 3px solid var(--accent-primary);
+      padding: 0.75rem 1rem;
+      border-radius: 0 8px 8px 0;
+      font-size: 0.875rem;
+      margin-bottom: 1rem;
+      color: #cbd5e1;
+    }
+
+    /* ── Visual Consistency Box ─────────────────────────── */
+    .consistency-card {
+      background: rgba(30, 41, 59, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      padding: 1rem;
+      font-size: 0.85rem;
+    }
+
+    .consistency-title {
+      font-weight: 700;
+      color: #cbd5e1;
+      margin-bottom: 0.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .consistency-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 0.25rem 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    }
+
+    .consistency-disclaimer {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      margin-top: 0.6rem;
+      font-style: italic;
+    }
+
+    /* ── Pipeline Visualizer Section ────────────────────── */
+    .pipeline-section {
+      margin-top: 2.5rem;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 1.5rem;
+    }
+
+    .section-title {
+      font-size: 1.6rem;
+      font-weight: 700;
+    }
+
+    .section-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+    }
+
+    .pipeline-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .stage-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: transform 0.2s ease, border-color 0.2s ease;
+    }
+
+    .stage-card:hover {
+      border-color: rgba(59, 130, 246, 0.4);
+      transform: translateY(-3px);
+    }
+
+    .stage-card-img-wrap {
+      width: 100%;
+      height: 220px;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    .stage-card-img-wrap img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .stage-card-body {
+      padding: 1.25rem;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .stage-name {
+      font-size: 1.05rem;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 0.4rem;
+    }
+
+    .stage-desc {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.45;
+      margin-bottom: 0.75rem;
+      flex: 1;
+    }
+
+    .stage-meta {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #60a5fa;
+      background: rgba(59, 130, 246, 0.1);
+      padding: 0.3rem 0.6rem;
+      border-radius: 6px;
+      display: inline-block;
+      align-self: flex-start;
+    }
+
+    /* ── Spinner ────────────────────────────────────────── */
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-radius: 50%;
+      border-top-color: #fff;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Toast Alert ────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 2rem;
+      right: 2rem;
+      padding: 0.8rem 1.4rem;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 0.9rem;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      display: none;
+      z-index: 1000;
+    }
+    #toast.error {
+      background: #dc2626;
+      color: #fff;
+    }
+    #toast.success {
+      background: #10b981;
+      color: #fff;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <!-- Header -->
+    <header>
+      <div class="badge-pill">IVP Mini-Project &bull; Classical Computer Vision</div>
+      <h1>RupeeVision</h1>
+      <p class="subtitle">Indian Currency Denomination Recognition &amp; Multi-Stage Image Processing Pipeline using OpenCV</p>
+    </header>
+
+    <!-- Top Controls -->
+    <div class="top-controls">
+      <label class="speech-toggle" title="Announce recognized denomination aloud">
+        <input type="checkbox" id="speechToggle" checked>
+        <span>Enable Audio Announcement</span>
+      </label>
+    </div>
+
+    <!-- Main Working Grid -->
+    <div class="grid-layout">
+      <!-- Left: Input & Capture Box -->
+      <div class="card">
+        <div class="card-title">
+          <span>Acquire Currency Note</span>
+        </div>
+
+        <div class="tabs">
+          <button class="tab-btn active" id="tabUpload" onclick="switchInputMode('upload')">Upload Image</button>
+          <button class="tab-btn" id="tabCamera" onclick="switchInputMode('camera')">Webcam Capture</button>
+        </div>
+
+        <!-- Upload Mode -->
+        <div id="uploadContainer">
+          <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+            <div class="dropzone-icon">&#128247;</div>
+            <div class="dropzone-text">Click or drag &amp; drop banknote image</div>
+            <div class="dropzone-hint">Supports JPG, PNG, WebP (Max 16 MB)</div>
+            <input type="file" id="fileInput" accept="image/*" style="display: none" onchange="handleFileSelect(event)">
+          </div>
+        </div>
+
+        <!-- Camera Mode -->
+        <div id="cameraContainer" class="camera-box">
+          <video id="cameraVideo" class="camera-video" autoplay playsinline muted></video>
+          <button class="btn-camera" id="btnSnap" onclick="takeSnapshot()">
+            <span>&#9899;</span> Capture Still Frame
+          </button>
+          <canvas id="snapshotCanvas" style="display: none"></canvas>
+        </div>
+
+        <!-- Preview Box -->
+        <div class="preview-box" id="previewBox">
+          <img id="previewImg" class="preview-img" alt="Selected Preview">
+        </div>
+
+        <button class="btn-analyze" id="btnAnalyze" onclick="submitAnalysis()" disabled>
+          <span id="btnText">Analyze Currency</span>
+          <span class="spinner" id="btnSpinner" style="display: none"></span>
+        </button>
+      </div>
+
+      <!-- Right: Recognition Summary -->
+      <div class="card">
+        <div class="card-title">
+          <span>Recognition Analysis</span>
+          <span id="processingTimeBadge" style="font-family: var(--font-mono); font-size: 0.8rem; color: #60a5fa; display: none;"></span>
+        </div>
+
+        <div class="result-container" id="resultContainer">
+          <div class="empty-state" id="emptyState">
+            <div class="empty-icon">&#128176;</div>
+            <p>Upload a currency image or capture a webcam photo and click <strong>Analyze Currency</strong> to inspect the recognition evidence and IVP processing stages.</p>
+          </div>
+
+          <div class="result-content" id="resultContent">
+            <!-- Denomination banner -->
+            <div class="denom-banner" id="denomBanner">
+              <div>
+                <div class="denom-title">Identified Denomination</div>
+                <div class="denom-val" id="denomVal">&#8377;--</div>
+              </div>
+              <div class="confidence-tag" id="confidenceTag">None</div>
+            </div>
+
+            <!-- Authenticity Verdict Banner -->
+            <div class="auth-banner auth-genuine" id="authBanner">
+              <div class="auth-icon" id="authIcon">&#9989;</div>
+              <div style="flex: 1;">
+                <div class="auth-title">Authenticity Analysis</div>
+                <div class="auth-status" id="authStatus">Awaiting Analysis</div>
+                <div class="auth-reason" id="authReason">Upload or capture a note to evaluate security features.</div>
+              </div>
+            </div>
+
+            <!-- Metrics Grid -->
+            <div class="metrics-grid">
+              <div class="metric-card">
+                <div class="metric-num" id="mInliers">0</div>
+                <div class="metric-label">RANSAC Inliers</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-num" id="mMatches">0</div>
+                <div class="metric-label">Lowe's Matches</div>
+              </div>
+              <div class="metric-card">
+                <div class="metric-num" id="mLatency">0.0s</div>
+                <div class="metric-label">IVP Latency</div>
+              </div>
+            </div>
+
+            <!-- Evidence explanation -->
+            <div class="evidence-box" id="evidenceBox">
+              Awaiting feature correspondence verification.
+            </div>
+
+            <!-- Preliminary Visual Consistency -->
+            <div class="consistency-card">
+              <div class="consistency-title">
+                <span>&#128065; Preliminary Visual Consistency Analysis</span>
+              </div>
+              <div class="consistency-row">
+                <span style="color: var(--text-muted)">Texture Sharpness (Laplacian var)</span>
+                <span id="cSharpness">--</span>
+              </div>
+              <div class="consistency-row">
+                <span style="color: var(--text-muted)">Framing Aspect Ratio</span>
+                <span id="cAspectRatio">--</span>
+              </div>
+              <div class="consistency-row">
+                <span style="color: var(--text-muted)">HSV Color Profile Similarity</span>
+                <span id="cColor">--</span>
+              </div>
+              <div class="consistency-disclaimer">
+                Note: Visual consistency analysis provides classical IVP heuristic metrics (blur, ratio, color) for demonstration. It does not certify official legal currency genuineness.
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Processing Pipeline Visualizer -->
+    <section class="pipeline-section" id="pipelineSection" style="display: none;">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">IVP Processing Pipeline Visualizer</h2>
+          <p class="section-desc">Inspect every intermediate stage output generated live by the OpenCV Python backend</p>
+        </div>
+      </div>
+
+      <div class="pipeline-grid" id="pipelineGrid">
+        <!-- Dynamically populated with real OpenCV stages -->
+      </div>
+    </section>
+  </div>
+
+  <div id="toast"></div>
+
+  <script>
+    // ── Global State ──────────────────────────────────────────────────────────
+    let activeFile = null;
+    let cameraStream = null;
+    let cameraBase64 = null;
+
+    // ── Input Mode Switching ──────────────────────────────────────────────────
+    function switchInputMode(mode) {
+      const tabUpload = document.getElementById('tabUpload');
+      const tabCamera = document.getElementById('tabCamera');
+      const uploadCont = document.getElementById('uploadContainer');
+      const cameraCont = document.getElementById('cameraContainer');
+
+      if (mode === 'upload') {
+        tabUpload.classList.add('active');
+        tabCamera.classList.remove('active');
+        uploadCont.style.display = 'block';
+        cameraCont.style.display = 'none';
+        stopCamera();
+      } else {
+        tabCamera.classList.add('active');
+        tabUpload.classList.remove('active');
+        cameraCont.style.display = 'flex';
+        uploadCont.style.display = 'none';
+        startCamera();
+      }
+    }
+
+    // ── Drag & Drop Handlers ──────────────────────────────────────────────────
+    const dropzone = document.getElementById('dropzone');
+    ['dragenter', 'dragover'].forEach(ev => {
+      dropzone.addEventListener(ev, (e) => {
+        e.preventDefault();
+        dropzone.classList.add('dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(ev => {
+      dropzone.addEventListener(ev, (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+      });
+    });
+    dropzone.addEventListener('drop', (e) => {
+      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+        processSelectedFile(e.dataTransfer.files[0]);
+      }
+    });
+
+    function handleFileSelect(e) {
+      if (e.target.files && e.target.files[0]) {
+        processSelectedFile(e.target.files[0]);
+      }
+    }
+
+    function processSelectedFile(file) {
+      if (!file.type.startsWith('image/')) {
+        showToast('Please select a valid image file (JPEG, PNG, WebP).', 'error');
+        return;
+      }
+      activeFile = file;
+      cameraBase64 = null;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        showPreview(e.target.result);
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function showPreview(dataUrl) {
+      const previewBox = document.getElementById('previewBox');
+      const previewImg = document.getElementById('previewImg');
+      previewImg.src = dataUrl;
+      previewBox.style.display = 'block';
+      document.getElementById('btnAnalyze').disabled = false;
+    }
+
+    // ── Webcam Access ─────────────────────────────────────────────────────────
+    async function startCamera() {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'environment' }
+        });
+        const video = document.getElementById('cameraVideo');
+        video.srcObject = cameraStream;
+      } catch (err) {
+        showToast('Could not access camera: ' + err.message, 'error');
+        switchInputMode('upload');
+      }
+    }
+
+    function stopCamera() {
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+      }
+    }
+
+    function takeSnapshot() {
+      const video = document.getElementById('cameraVideo');
+      const canvas = document.getElementById('snapshotCanvas');
+      if (!video.videoWidth) return;
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      cameraBase64 = canvas.toDataURL('image/jpeg', 0.9);
+      activeFile = null;
+      showPreview(cameraBase64);
+      showToast('Frame captured from camera.', 'success');
+    }
+
+    // ── Speech Synthesis ──────────────────────────────────────────────────────
+    function announceDenomination(text) {
+      const toggle = document.getElementById('speechToggle');
+      if (!toggle.checked || !window.speechSynthesis) return;
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    // ── Submit & Analyze ──────────────────────────────────────────────────────
+    async function submitAnalysis() {
+      if (!activeFile && !cameraBase64) {
+        showToast('Please provide an image first.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('btnAnalyze');
+      const btnText = document.getElementById('btnText');
+      const btnSpinner = document.getElementById('btnSpinner');
+
+      btn.disabled = true;
+      btnText.textContent = 'Processing Pipeline...';
+      btnSpinner.style.display = 'inline-block';
+
+      try {
+        let response;
+        if (activeFile) {
+          const formData = new FormData();
+          formData.append('image', activeFile);
+          response = await fetch('/api/analyze', {
+            method: 'POST',
+            body: formData
+          });
+        } else {
+          response = await fetch('/api/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_base64: cameraBase64 })
+          });
+        }
+
+        const data = await response.json();
+        if (!response.ok || data.status === 'error') {
+          throw new Error(data.error || 'Server processing failed');
+        }
+
+        renderResults(data);
+      } catch (err) {
+        showToast('Error: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btnText.textContent = 'Analyze Currency';
+        btnSpinner.style.display = 'none';
+      }
+    }
+
+    // ── Render Outputs ────────────────────────────────────────────────────────
+    function renderResults(data) {
+      document.getElementById('emptyState').style.display = 'none';
+      document.getElementById('resultContent').style.display = 'block';
+
+      const timeBadge = document.getElementById('processingTimeBadge');
+      timeBadge.textContent = `${data.processing_time_sec}s`;
+      timeBadge.style.display = 'inline';
+
+      const denomBanner = document.getElementById('denomBanner');
+      const denomVal = document.getElementById('denomVal');
+      const confTag = document.getElementById('confidenceTag');
+
+      const authBanner = document.getElementById('authBanner');
+      const authStatus = document.getElementById('authStatus');
+      const authReason = document.getElementById('authReason');
+      const authIcon = document.getElementById('authIcon');
+
+      if (data.recognized && data.denomination) {
+        denomBanner.classList.remove('unrecognized');
+        denomVal.innerHTML = `&#8377; ${data.denomination}`;
+
+        // Authenticity Verdict Handling
+        if (data.authenticity_verdict === 'GENUINE') {
+          authBanner.className = 'auth-banner auth-genuine';
+          authIcon.textContent = '✅';
+          authStatus.textContent = 'GENUINE (AUTHENTIC CURRENCY)';
+          authReason.textContent = 'Passed all security feature, texture sharpness, and color checks. No cancellation stamps detected.';
+          announceDenomination(`${data.denomination} rupees detected — Genuine banknote.`);
+        } else if (data.authenticity_verdict === 'SPECIMEN') {
+          authBanner.className = 'auth-banner auth-specimen';
+          authIcon.textContent = '⚠️';
+          authStatus.textContent = 'SPECIMEN / CANCELLED NOTE (NOT LEGAL TENDER)';
+          authReason.textContent = (data.authenticity_anomalies && data.authenticity_anomalies.length > 0) ?
+            data.authenticity_anomalies.join(' ') : 'Detected cancellation markings or specimen stamp overlay.';
+          announceDenomination(`Warning: ${data.denomination} rupees specimen note detected. Not genuine currency.`);
+        } else if (data.authenticity_verdict === 'FAKE') {
+          authBanner.className = 'auth-banner auth-fake';
+          authIcon.textContent = '❌';
+          authStatus.textContent = 'SUSPICIOUS / LIKELY FAKE';
+          authReason.textContent = (data.authenticity_anomalies && data.authenticity_anomalies.length > 0) ?
+            data.authenticity_anomalies.join(' ') : 'Failed multi-factor security consistency checks.';
+          announceDenomination(`Warning: ${data.denomination} rupees note failed authenticity verification.`);
+        }
+      } else {
+        denomBanner.classList.add('unrecognized');
+        denomVal.textContent = 'Unable to recognize';
+        authBanner.className = 'auth-banner auth-unrecognized';
+        authIcon.textContent = '❓';
+        authStatus.textContent = 'UNABLE TO VERIFY AUTHENTICITY';
+        authReason.textContent = 'Insufficient feature correspondences to establish identity or test security marks.';
+        announceDenomination('Unable to recognize denomination.');
+      }
+
+      confTag.textContent = data.confidence_level + ' Evidence';
+      confTag.className = 'confidence-tag ' + (
+        data.confidence_level === 'High' ? 'conf-high' :
+        data.confidence_level === 'Moderate' ? 'conf-mod' : 'conf-none'
+      );
+
+      document.getElementById('mInliers').textContent = data.best_inlier_count;
+      document.getElementById('mMatches').textContent = data.best_good_matches;
+      document.getElementById('mLatency').textContent = `${data.processing_time_sec}s`;
+      document.getElementById('evidenceBox').textContent = data.evidence_summary;
+
+      // Visual Consistency
+      const c = data.consistency_analysis;
+      if (c) {
+        document.getElementById('cSharpness').textContent = `${c.sharpness_variance} (${c.sharpness_status})`;
+        document.getElementById('cAspectRatio').textContent = `${c.aspect_ratio} (${c.aspect_ratio_status})`;
+        document.getElementById('cColor').textContent = c.color_correlation !== null ?
+          `${c.color_correlation} (${c.color_status})` : 'Unavailable';
+      }
+
+      // Populate Pipeline Stages
+      const grid = document.getElementById('pipelineGrid');
+      grid.innerHTML = '';
+      const stages = data.pipeline_stages;
+
+      for (const [key, stage] of Object.entries(stages)) {
+        if (!stage.image_data) continue;
+
+        const card = document.createElement('div');
+        card.className = 'stage-card';
+        card.innerHTML = `
+          <div class="stage-card-img-wrap">
+            <img src="${stage.image_data}" alt="${stage.title}">
+          </div>
+          <div class="stage-card-body">
+            <h3 class="stage-name">${stage.title}</h3>
+            <p class="stage-desc">${stage.description}</p>
+            ${stage.dimensions ? `<div class="stage-meta">${stage.dimensions}</div>` : ''}
+            ${stage.parameters ? `<div class="stage-meta">${stage.parameters}</div>` : ''}
+            ${stage.thresholds ? `<div class="stage-meta">${stage.thresholds}</div>` : ''}
+            ${stage.keypoint_count ? `<div class="stage-meta">${stage.keypoint_count} Keypoints</div>` : ''}
+          </div>
+        `;
+        grid.appendChild(card);
+      }
+
+      document.getElementById('pipelineSection').style.display = 'block';
+      document.getElementById('pipelineSection').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function showToast(msg, type = 'error') {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.className = type;
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 4000);
+    }
+  </script>
+</body>
+</html>
