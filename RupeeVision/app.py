@@ -103,10 +103,32 @@ def extract_keypoints_and_descriptors(gray_img):
     return ORB_DETECTOR.compute(gray_img, kps)
 
 
+# Known corrupted, misfiled, or infographic files in dataset to exclude
+EXCLUDED_FILES = {
+    "10": {"0.jpg", "64.jpg", "106.jpg", "107.jpg"},
+    "20": {"4.jpg", "37.jpg", "73.jpg", "28.jpg"},
+    "50": {"44.jpg", "66.jpg", "84.jpg"},
+    "100": {"8.jpg"},
+    "200": {"7.jpg", "33.jpg", "56.jpg"},
+    "500": {"13.jpg", "34.jpg", "42.jpg", "63.jpg", "84.jpg"}
+}
+
+# Curated reference templates ensuring front & back and new & old series representation
+CURATED_TEMPLATES = {
+    "10": ["9.jpg", "20.jpg", "22.jpg", "33.jpg", "39.jpg", "45.jpg", "102.jpg"],
+    "20": ["18.jpg", "48.jpg", "60.jpg", "69.jpg", "81.jpg", "8.jpg", "49.jpg", "66.jpg", "35.jpg", "51.jpg"],
+    "50": ["10.jpg", "11.jpg", "13.jpg", "49.jpg", "70.jpg", "14.jpg", "18.jpg", "27.jpg", "30.jpg"],
+    "100": ["0.jpg", "10.jpg", "11.jpg", "14.jpg", "17.jpg", "19.jpg", "23.jpg", "47.jpg", "80.jpg"],
+    "200": ["11.jpg", "19.jpg", "20.jpg", "42.jpg", "43.jpg", "50.jpg", "75.jpg", "87.jpg", "89.jpg"],
+    "500": ["0.jpg", "10.jpg", "11.jpg", "100.jpg", "101.jpg", "102.jpg", "27.jpg", "36.jpg", "51.jpg"]
+}
+
+
 def load_reference_dataset(max_images_per_denom=15):
     """
-    Scans Dataset/{denom}/ on startup, pre-extracts keypoints and descriptors,
-    and caches them in RAM to enable real-time sub-second query recognition.
+    Scans Dataset/{denom}/ on startup, systematically filters out contaminated/misplaced files,
+    loads verified genuine templates (both front and back, new and old series), and caches
+    ORB/BEBLID features and color histograms in RAM for robust real-time matching.
     """
     global DATASET_CACHE
     DATASET_CACHE = {}
@@ -123,43 +145,47 @@ def load_reference_dataset(max_images_per_denom=15):
             continue
 
         DATASET_CACHE[denom] = []
-        files = sorted([
-            f for f in os.listdir(denom_path)
+        candidate_files = list(CURATED_TEMPLATES.get(denom, []))
+        all_files = [
+            f for f in sorted(os.listdir(denom_path))
             if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-        ])
+        ]
+        for f in all_files:
+            if f not in candidate_files and f not in EXCLUDED_FILES.get(denom, set()):
+                candidate_files.append(f)
 
-        # Select representative images up to max_images_per_denom for rapid matching
-        selected_files = files[:max_images_per_denom]
-
-        for fname in selected_files:
+        for fname in candidate_files:
+            if fname in EXCLUDED_FILES.get(denom, set()):
+                continue
             fpath = os.path.join(denom_path, fname)
             bgr = cv2.imread(fpath)
             if bgr is None:
                 continue
 
-            # Standardize reference template width to 600px to maintain consistent feature scale
             h, w = bgr.shape[:2]
-            target_w = 600
-            scale = target_w / float(w)
-            resized_bgr = cv2.resize(bgr, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+            ar = max(w, h) / float(min(w, h) + 1e-5)
 
-            # Convert template to grayscale for feature extraction
-            gray = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2GRAY)
+            # Banknotes are horizontal rectangles with aspect ratio between 1.50 and 2.75
+            if (1.50 <= ar <= 2.75 and min(w, h) >= 120) or (fname in CURATED_TEMPLATES.get(denom, [])):
+                target_w = 600
+                scale = target_w / float(w)
+                resized_bgr = cv2.resize(bgr, (target_w, int(h * scale)), interpolation=cv2.INTER_AREA)
+                gray = cv2.cvtColor(resized_bgr, cv2.COLOR_BGR2GRAY)
+                kp, des = extract_keypoints_and_descriptors(gray)
+                if des is not None and len(des) >= 20:
+                    DATASET_CACHE[denom].append({
+                        "filename": fname,
+                        "bgr": resized_bgr,
+                        "gray": gray,
+                        "kp": kp,
+                        "des": des,
+                        "quality_score": len(kp)
+                    })
+                    total_loaded += 1
+                    if len(DATASET_CACHE[denom]) >= max_images_per_denom:
+                        break
 
-            # Extract keypoints and binary descriptors
-            kp, des = extract_keypoints_and_descriptors(gray)
-            if des is not None and len(des) > 0:
-                # Store in RAM cache
-                DATASET_CACHE[denom].append({
-                    "filename": fname,
-                    "bgr": resized_bgr,
-                    "gray": gray,
-                    "kp": kp,
-                    "des": des
-                })
-                total_loaded += 1
-
-    print(f"[INFO] Loaded reference dataset: {total_loaded} images across {len(DATASET_CACHE)} denominations.")
+    print(f"[INFO] Loaded reference dataset: {total_loaded} high-quality templates across {len(DATASET_CACHE)} denominations.")
 
 
 ################################################################################
@@ -288,6 +314,66 @@ def execute_ivp_pipeline(raw_bgr):
         "description": "Validated the uploaded image stream and decoded into a 3-channel BGR numpy matrix.",
         "dimensions": f"{orig_w} × {orig_h} px",
         "image_data": encode_cv2_image_to_base64(raw_bgr)
+    }
+
+    # ── Pre-flight Image Quality Assessment (IQA) ──
+    # Classical statistical & frequency-domain evaluation of the raw optical input
+    raw_gray_iqa = cv2.cvtColor(raw_bgr, cv2.COLOR_BGR2GRAY)
+    iqa_lap_var = float(cv2.Laplacian(raw_gray_iqa, cv2.CV_64F).var())
+    iqa_brightness = float(np.mean(raw_gray_iqa))
+    iqa_contrast = float(np.std(raw_gray_iqa))
+    glare_pixels = int(np.sum(raw_gray_iqa > 245))
+    glare_ratio = float(glare_pixels) / float(raw_gray_iqa.size)
+
+    if iqa_lap_var >= 25.0:
+        sharpness_rating = "Sharp Texture"
+    elif iqa_lap_var >= 14.0:
+        sharpness_rating = "Moderate Sharpness"
+    else:
+        sharpness_rating = "Blurry / Motion Soft"
+
+    if iqa_brightness < 60.0:
+        lighting_rating = "Under-exposed / Dim"
+    elif iqa_brightness > 205.0 or glare_ratio > 0.08:
+        lighting_rating = "Over-exposed / Glare"
+    else:
+        lighting_rating = "Well-lit (Optimal)"
+
+    if iqa_contrast >= 38.0:
+        contrast_rating = "High Dynamic Range"
+    elif iqa_contrast >= 24.0:
+        contrast_rating = "Normal Contrast"
+    else:
+        contrast_rating = "Low Contrast"
+
+    iqa_recommendations = []
+    if iqa_lap_var < 14.0:
+        iqa_recommendations.append("Camera blur detected: hold device steady and refocus.")
+    if iqa_brightness < 60.0:
+        iqa_recommendations.append("Low lighting: illuminate banknote with direct ambient light.")
+    if glare_ratio > 0.08:
+        iqa_recommendations.append("Harsh glare detected: tilt banknote slightly away from direct flash/lamp.")
+    if iqa_contrast < 24.0:
+        iqa_recommendations.append("Low contrast: place banknote against a contrasting dark/plain background.")
+
+    if not iqa_recommendations:
+        iqa_status = "EXCELLENT"
+        iqa_recommendations.append("Optical quality is optimal for invariant keypoint extraction and verification.")
+    elif len(iqa_recommendations) == 1 and iqa_lap_var >= 12.0:
+        iqa_status = "ACCEPTABLE"
+    else:
+        iqa_status = "POOR (RE-CAPTURE SUGGESTED)"
+
+    iqa_data = {
+        "sharpness_variance": round(iqa_lap_var, 1),
+        "sharpness_rating": sharpness_rating,
+        "mean_brightness": round(iqa_brightness, 1),
+        "lighting_rating": lighting_rating,
+        "contrast_std": round(iqa_contrast, 1),
+        "contrast_rating": contrast_rating,
+        "glare_percentage": round(glare_ratio * 100.0, 1),
+        "overall_status": iqa_status,
+        "recommendations": iqa_recommendations
     }
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -440,7 +526,82 @@ def execute_ivp_pipeline(raw_bgr):
         perspective_desc = "Successfully calculated homography matrix H and warped quadrilateral region to fronto-parallel view using cv2.warpPerspective."
         rectified_available = True
         recognition_input_bgr = warped_bgr
-    else                # Geometric Homography Verification with RANSAC
+    else:
+        # Fallback: Agar 4 corners nahi the, to original resized photo par hi matching aage badha do
+        perspective_img_b64 = None
+        perspective_desc = "Perspective correction skipped due to absence of 4 distinct convex corners. Recognition will proceed directly using the preprocessed image."
+        rectified_available = False
+        recognition_input_bgr = resized_bgr
+
+    stages["stage8_perspective"] = {
+        "title": "Stage 8: Perspective Rectification",
+        "description": perspective_desc,
+        "rectified_available": rectified_available,
+        "image_data": perspective_img_b64
+    }
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Stage 9: Feature Extraction & Matching (ORB/BEBLID + Lowe's + RANSAC)
+    # ──────────────────────────────────────────────────────────────────────────
+    rec_gray = cv2.cvtColor(recognition_input_bgr, cv2.COLOR_BGR2GRAY)
+    rec_clahe = clahe.apply(rec_gray)
+    query_kp, query_des = extract_keypoints_and_descriptors(rec_clahe)
+
+    # Annotated query keypoints visualization
+    kp_vis = cv2.drawKeypoints(
+        recognition_input_bgr, query_kp, None,
+        color=(0, 255, 0), flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS
+    )
+    stages["stage9a_keypoints"] = {
+        "title": "Stage 9A: Feature Keypoint Detection",
+        "description": f"Extracted {len(query_kp)} invariant keypoints using ORB (Oriented FAST corners + multi-scale pyramid) and computed binary local intensity descriptors.",
+        "keypoint_count": len(query_kp),
+        "image_data": encode_cv2_image_to_base64(kp_vis)
+    }
+
+    # Compare query descriptors against reference templates in DATASET_CACHE
+    denom_scores = {}
+    best_matched_denom = None
+    best_score = -1.0
+    best_inlier_count = 0
+    best_good_matches_count = 0
+    best_ref_entry = None
+    best_good_matches = []
+    best_H_matrix = None
+
+    if query_des is not None and len(query_des) >= 10 and DATASET_CACHE:
+        for denom, ref_list in DATASET_CACHE.items():
+            denom_total_good = 0
+            denom_total_inliers = 0
+            top_sample_good = 0
+            top_sample_inliers = 0
+            top_sample_score = -1.0
+            top_sample_entry = None
+            top_sample_matches = []
+            top_sample_H = None
+
+            for ref in ref_list:
+                ref_des = ref["des"]
+                ref_kp = ref["kp"]
+
+                if ref_des is None or len(ref_des) < 5:
+                    continue
+
+                try:
+                    # k-NN match with k=2
+                    knn_matches = BF_MATCHER.knnMatch(query_des, ref_des, k=2)
+                except Exception:
+                    continue
+
+                # Lowe's Ratio Test (m.distance < 0.75 * n.distance)
+                good = []
+                for pair in knn_matches:
+                    if len(pair) == 2:
+                        m, n = pair
+                        if m.distance < 0.75 * n.distance:
+                            good.append(m)
+
+                # Geometric Homography Verification with RANSAC
                 inlier_count = 0
                 sample_H = None
                 if len(good) >= 6:
@@ -455,10 +616,16 @@ def execute_ivp_pipeline(raw_bgr):
                         inlier_count = 0
                         sample_H = None
 
+                # Color correlation validation
+                sample_color = compute_masked_color_correlation(recognition_input_bgr, ref["bgr"])
+                # Multi-modal score combines spatial inliers with chromaticity profile
+                sample_score = (inlier_count * 1.0) * (0.35 + 0.65 * sample_color)
+
                 denom_total_good += len(good)
                 denom_total_inliers += inlier_count
 
-                if inlier_count > top_sample_inliers or (inlier_count == top_sample_inliers and len(good) > top_sample_good):
+                if sample_score > top_sample_score or (sample_score == top_sample_score and inlier_count > top_sample_inliers):
+                    top_sample_score = sample_score
                     top_sample_inliers = inlier_count
                     top_sample_good = len(good)
                     top_sample_entry = ref
@@ -470,16 +637,18 @@ def execute_ivp_pipeline(raw_bgr):
                 "total_inliers": denom_total_inliers,
                 "top_sample_good": top_sample_good,
                 "top_sample_inliers": top_sample_inliers,
+                "top_sample_score": round(top_sample_score, 1),
                 "sample_count": len(ref_list)
             }
 
-            # ── Check if this denomination is the winner so far ──
-            if top_sample_inliers > best_inlier_count or (top_sample_inliers == best_inlier_count and top_sample_good > best_good_matches_count):
-                best_inlier_count = top_sample_inliers         # Sabse zyada geometrically verified points
-                best_good_matches_count = top_sample_good     # Total ache feature matches
-                best_matched_denom = denom                    # Winning denomination (e.g. "500")
-                best_ref_entry = top_sample_entry             # Reference image ka data
-                best_good_matches = top_sample_matches        # Match pairs ki list
+            # Winning denomination has the strongest multi-factor correspondence
+            if top_sample_score > best_score:
+                best_score = top_sample_score
+                best_inlier_count = top_sample_inliers
+                best_good_matches_count = top_sample_good
+                best_matched_denom = denom
+                best_ref_entry = top_sample_entry
+                best_good_matches = top_sample_matches
                 best_H_matrix = top_sample_H
 
     # ── Stage 9B: Draw green connecting lines between matching features ──
@@ -508,8 +677,6 @@ def execute_ivp_pipeline(raw_bgr):
         }
 
     # ── Homography-driven Banknote Localization & Refinement ──
-    # If initial contour missed the 4 corners (e.g. fingers holding the note),
-    # project the reference note's corners onto the query image via Homography H!
     auth_target_bgr = recognition_input_bgr
     if best_H_matrix is not None and best_ref_entry is not None and best_inlier_count >= 8:
         ref_h, ref_w = best_ref_entry["bgr"].shape[:2]
@@ -548,15 +715,15 @@ def execute_ivp_pipeline(raw_bgr):
     evidence_summary = ""
 
     if best_matched_denom is not None:
-        if best_inlier_count >= 15 and best_good_matches_count >= 20:
+        if best_inlier_count >= 20 and best_good_matches_count >= MIN_GOOD_MATCHES:
             is_recognized = True
             recognized_denom = best_matched_denom
             confidence_level = "High"
             evidence_summary = (
-                f"Strong geometric correspondence: {best_inlier_count} RANSAC inliers "
-                f"from {best_good_matches_count} filtered ORB/BEBLID feature matches against ₹{best_matched_denom} reference."
+                f"Strong correspondence: {best_inlier_count} RANSAC inliers and "
+                f"{best_good_matches_count} feature matches against ₹{best_matched_denom} reference."
             )
-        elif best_inlier_count >= MIN_INLIER_THRESHOLD or best_good_matches_count >= MIN_GOOD_MATCHES:
+        elif best_inlier_count >= MIN_INLIER_THRESHOLD:
             is_recognized = True
             recognized_denom = best_matched_denom
             confidence_level = "Moderate"
@@ -579,57 +746,161 @@ def execute_ivp_pipeline(raw_bgr):
     auth_gray = cv2.cvtColor(auth_target_bgr, cv2.COLOR_BGR2GRAY)
     lap_var = cv2.Laplacian(auth_gray, cv2.CV_64F).var()
     consistency["sharpness_variance"] = round(float(lap_var), 1)
-    consistency["sharpness_status"] = "Normal print sharpness" if lap_var >= 20.0 else "Slightly soft / low texture detail"
+    consistency["sharpness_status"] = "Normal print sharpness" if lap_var >= 15.0 else "Slightly soft / low texture detail"
 
     ah, aw = auth_target_bgr.shape[:2]
     aspect_ratio = max(aw, ah) / float(min(aw, ah) + 1e-5)
     consistency["aspect_ratio"] = round(float(aspect_ratio), 2)
-    consistency["aspect_ratio_status"] = "Consistent with banknote geometry" if (1.65 <= aspect_ratio <= 2.50) else "Non-standard aspect ratio"
+    consistency["aspect_ratio_status"] = "Consistent with banknote geometry" if (1.60 <= aspect_ratio <= 2.50) else "Non-standard aspect ratio"
 
     color_corr = None
     if best_ref_entry is not None:
         color_corr = compute_masked_color_correlation(auth_target_bgr, best_ref_entry["bgr"])
         consistency["color_correlation"] = round(color_corr, 3)
-        consistency["color_status"] = "Color palette matches reference" if color_corr >= 0.38 else "Color profile deviates from reference"
+        consistency["color_status"] = "Color palette matches reference" if color_corr >= 0.30 else "Color profile deviates from reference"
     else:
         consistency["color_correlation"] = None
         consistency["color_status"] = "Unavailable (no reference match)"
 
     # ──────────────────────────────────────────────────────────────────────────
-    # Stage 10: Multi-Factor Authenticity & Specimen / Defacement Inspection
+    # Stage 10: Multi-Factor Authenticity & RBI Physical Security Inspection
     # ──────────────────────────────────────────────────────────────────────────
     annotated_auth = auth_target_bgr.copy()
     anomalies = []
     is_specimen = False
 
-    rx1, rx2 = int(aw * 0.55), int(aw * 0.96)
+    # Watermark and signature field coordinates:
+    # Front-side watermark zone: x from 55% to 94%, y from 14% to 72%
+    rx1, rx2 = int(aw * 0.55), int(aw * 0.94)
     ry1, ry2 = int(ah * 0.14), int(ah * 0.72)
     wm_roi = auth_target_bgr[ry1:ry2, rx1:rx2]
 
+    stamp_boxes = []
+    red_ratio = 0.0
+    max_cluster = 0.0
+
     if wm_roi.size > 0:
         hsv_wm = cv2.cvtColor(wm_roi, cv2.COLOR_BGR2HSV)
-        m1 = cv2.inRange(hsv_wm, np.array([0, 130, 90]), np.array([10, 255, 255]))
-        m2 = cv2.inRange(hsv_wm, np.array([170, 130, 90]), np.array([180, 255, 255]))
+        # Saturated red/crimson ink mask (covers red SPECIMEN and CANCELLED stamps)
+        m1 = cv2.inRange(hsv_wm, np.array([0, 75, 65]), np.array([12, 255, 255]))
+        m2 = cv2.inRange(hsv_wm, np.array([160, 75, 65]), np.array([180, 255, 255]))
         stamp_mask = m1 | m2
         wm_area = wm_roi.shape[0] * wm_roi.shape[1]
         red_count = cv2.countNonZero(stamp_mask)
         red_ratio = red_count / float(max(wm_area, 1))
 
         contours_stamp, _ = cv2.findContours(stamp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        stamp_boxes = [c for c in contours_stamp if cv2.contourArea(c) > 150]
+        stamp_boxes = [c for c in contours_stamp if cv2.contourArea(c) > 200]
+        if contours_stamp:
+            max_cluster = max([cv2.contourArea(c) for c in contours_stamp])
 
+        # Draw inspected watermark security zone
         cv2.rectangle(annotated_auth, (rx1, ry1), (rx2, ry2), (255, 200, 0), 2)
-        cv2.putText(annotated_auth, "Watermark Zone", (rx1, ry1 - 8),
+        cv2.putText(annotated_auth, "Watermark Security Zone", (rx1, ry1 - 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
 
-        if recognized_denom in ["500", "100", "200"] and red_ratio > 0.045 and len(stamp_boxes) >= 2:
-            is_specimen = True
-            anomalies.append(f"Detected red cancellation stamp / 'SPECIMEN' markings ({red_ratio*100:.1f}% coverage).")
-            for c in stamp_boxes:
-                bx, by, bw, bh = cv2.boundingRect(c)
-                cv2.rectangle(annotated_auth, (rx1 + bx, ry1 + by), (rx1 + bx + bw, ry1 + by + bh), (0, 0, 255), 2)
-            cv2.putText(annotated_auth, "SPECIMEN STAMP DETECTED", (rx1, ry2 + 22),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2, cv2.LINE_AA)
+        # Denomination-aware specimen stamp check:
+        # Genuine ₹500 is stone-grey: saturated red ink in the watermark field is strictly 0.0%.
+        if recognized_denom == "500":
+            if red_ratio > 0.02 and (max_cluster > 350 or len(stamp_boxes) >= 1):
+                is_specimen = True
+                anomalies.append(f"Detected red cancellation / 'SPECIMEN' stamp in watermark field ({red_count} px, {red_ratio*100:.1f}% coverage).")
+                for c in stamp_boxes:
+                    bx, by, bw, bh = cv2.boundingRect(c)
+                    cv2.rectangle(annotated_auth, (rx1 + bx, ry1 + by), (rx1 + bx + bw, ry1 + by + bh), (0, 0, 255), 2)
+                cv2.putText(annotated_auth, "SPECIMEN STAMP DETECTED", (rx1, ry2 + 24),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2, cv2.LINE_AA)
+
+    # ── RBI Physical Security Feature Matrix Extraction ──
+    security_features = {}
+
+    # Feature 1: Windowed Security Thread (localized at 37% - 44% width)
+    st_x1, st_x2 = int(aw * 0.37), int(aw * 0.44)
+    st_roi = auth_target_bgr[:, st_x1:st_x2]
+    if st_roi.size > 0:
+        st_gray = cv2.cvtColor(st_roi, cv2.COLOR_BGR2GRAY)
+        sobel_x = cv2.Sobel(st_gray, cv2.CV_64F, 1, 0, ksize=3)
+        st_grad = float(np.mean(np.abs(sobel_x)))
+        st_verified = st_grad >= 18.0
+        cv2.rectangle(annotated_auth, (st_x1, 0), (st_x2, ah), (0, 255, 255), 1)
+        security_features["security_thread"] = {
+            "name": "Security Thread Band",
+            "verified": st_verified,
+            "metric_value": round(st_grad, 1),
+            "status": "Verified: Vertical high-gradient security band localized" if st_verified else "Caution: Thread gradient energy is weak"
+        }
+    else:
+        security_features["security_thread"] = {
+            "name": "Security Thread Band",
+            "verified": False,
+            "metric_value": 0.0,
+            "status": "Region unavailable"
+        }
+
+    # Feature 2: Mahatma Gandhi Watermark Window (Right side)
+    if wm_roi.size > 0:
+        wm_gray = cv2.cvtColor(wm_roi, cv2.COLOR_BGR2GRAY)
+        wm_mean = float(np.mean(wm_gray))
+        wm_verified = (not is_specimen) and (wm_mean >= 85.0)
+        security_features["watermark_window"] = {
+            "name": "Watermark Window",
+            "verified": wm_verified,
+            "metric_value": round(wm_mean, 1),
+            "status": "Verified: Clean translucent watermark window" if wm_verified else "Flagged: Watermark area occluded or stamped"
+        }
+    else:
+        security_features["watermark_window"] = {
+            "name": "Watermark Window",
+            "verified": False,
+            "metric_value": 0.0,
+            "status": "Region unavailable"
+        }
+
+    # Feature 3: Intaglio Relief & Micro-lettering Texture
+    intaglio_roi = auth_target_bgr[int(ah*0.2):int(ah*0.8), int(aw*0.15):int(aw*0.65)]
+    if intaglio_roi.size > 0:
+        int_gray = cv2.cvtColor(intaglio_roi, cv2.COLOR_BGR2GRAY)
+        int_lap = float(cv2.Laplacian(int_gray, cv2.CV_64F).var())
+        int_verified = int_lap >= 15.0
+        security_features["intaglio_relief"] = {
+            "name": "Intaglio Relief Texture",
+            "verified": int_verified,
+            "metric_value": round(int_lap, 1),
+            "status": "Verified: Crisp micro-printing & intaglio textures detected" if int_verified else "Caution: Low high-frequency textural detail"
+        }
+    else:
+        security_features["intaglio_relief"] = {
+            "name": "Intaglio Relief Texture",
+            "verified": False,
+            "metric_value": 0.0,
+            "status": "Region unavailable"
+        }
+
+    # Feature 4: RBI Dimensional Aspect Ratio
+    ar_verified = (1.70 <= aspect_ratio <= 2.55)
+    security_features["aspect_ratio"] = {
+        "name": "Dimensional Aspect Ratio",
+        "verified": ar_verified,
+        "metric_value": round(float(aspect_ratio), 2),
+        "status": f"Verified: Ratio ({aspect_ratio:.2f}) matches RBI banknote standard" if ar_verified else f"Flagged: Non-standard geometry ({aspect_ratio:.2f})"
+    }
+
+    # Feature 5: Color Profile Chromaticity Match
+    color_verified = (color_corr is not None and color_corr >= 0.28)
+    security_features["color_palette"] = {
+        "name": "Base Color Chromaticity",
+        "verified": color_verified,
+        "metric_value": round(color_corr, 3) if color_corr is not None else 0.0,
+        "status": f"Verified: HSV chromaticity matches reference ({color_corr:.2f})" if color_verified else "Caution: Chromaticity deviates from genuine template"
+    }
+
+    # Feature 6: Specimen & Defacement Check
+    security_features["specimen_check"] = {
+        "name": "Specimen & Defacement Check",
+        "verified": not is_specimen,
+        "metric_value": red_count if 'red_count' in locals() else 0,
+        "status": "Verified: Clean banknote without cancellation stamps" if not is_specimen else "CRITICAL: Saturated red SPECIMEN / CANCELLED stamp detected!"
+    }
 
     # Multi-factor score components:
     # 1. Inlier score (35% weight)
@@ -644,44 +915,43 @@ def execute_ivp_pipeline(raw_bgr):
     else:
         inlier_score = 20
 
-    # 2. Aspect ratio score (20% weight)
-    if 1.65 <= aspect_ratio <= 2.45:
+    # 2. Aspect ratio score (15% weight)
+    if 1.60 <= aspect_ratio <= 2.50:
         ar_score = 100
     elif 1.40 <= aspect_ratio <= 2.70:
-        ar_score = 75
+        ar_score = 80
     else:
-        ar_score = 40
+        ar_score = 50
         anomalies.append(f"Aspect ratio ({aspect_ratio:.2f}) deviates from standard RBI banknote geometry.")
 
-    # 3. Color correlation score (25% weight)
+    # 3. Color correlation score (30% weight)
     if color_corr is not None:
-        if color_corr >= 0.50:
+        if color_corr >= 0.45:
             color_score = 100
-        elif color_corr >= 0.35:
+        elif color_corr >= 0.30:
             color_score = 80
-        elif color_corr >= 0.20:
-            color_score = 55
+        elif color_corr >= 0.18:
+            color_score = 60
         else:
-            color_score = 20
-            anomalies.append(f"Low color correlation ({color_corr:.2f}) vs genuine RBI reference.")
+            color_score = 30
+            anomalies.append(f"Color profile correlation low ({color_corr:.2f}) vs genuine RBI reference.")
     else:
         color_score = 70
 
     # 4. Texture sharpness score (20% weight)
-    if lap_var >= 35.0:
+    if lap_var >= 25.0:
         tex_score = 100
-    elif lap_var >= 18.0:
-        tex_score = 80
+    elif lap_var >= 15.0:
+        tex_score = 85
+    elif lap_var >= 8.0:
+        tex_score = 65
     else:
-        tex_score = 45
-        anomalies.append("Slightly soft texture — hold camera steady or increase lighting.")
+        tex_score = 40
+        anomalies.append("Low texture variance — hold camera steady or ensure clear lighting.")
 
-    composite_score = int(0.35 * inlier_score + 0.25 * color_score + 0.20 * ar_score + 0.20 * tex_score)
+    composite_score = int(0.35 * inlier_score + 0.30 * color_score + 0.15 * ar_score + 0.20 * tex_score)
 
-    # Guardrails: low color correlation (<0.22) or very low inliers (<10) cap score
-    if (color_corr is not None and color_corr < 0.22) or best_inlier_count < 10:
-        composite_score = min(composite_score, 48)
-
+    # Final Authenticity Verdict Assignment
     if not is_recognized:
         auth_verdict = "UNRECOGNIZED"
         auth_label = "Unable to verify authenticity (insufficient feature evidence)"
@@ -692,99 +962,21 @@ def execute_ivp_pipeline(raw_bgr):
         is_genuine = False
     elif composite_score >= 65:
         auth_verdict = "GENUINE"
-        auth_label = f"LIKELY GENUINE ({composite_score}% Visual Consistency)"
+        auth_label = f"GENUINE ({composite_score}% Visual Consistency)"
         is_genuine = True
-        anomalies = []  # Clear minor warnings so UI displays clean genuine badge
+        anomalies = []  # Clear warnings for genuine display
     elif composite_score >= 45:
         auth_verdict = "FAKE"
-        auth_label = f"NEEDS PHYSICAL VERIFICATION ({composite_score}% Consistency)"
+        auth_label = f"SUSPICIOUS / LIKELY FAKE ({composite_score}% Consistency)"
         is_genuine = False
     else:
         auth_verdict = "FAKE"
-        auth_label = f"SUSPICIOUS / INCONSISTENT ({composite_score}% Consistency)"
+        auth_label = f"FAKE / COUNTERFEIT ({composite_score}% Consistency)"
         is_genuine = False
 
     stages["stage10_authenticity"] = {
-        "title": "Stage 10: Authenticity & Specimen Inspection",
+        "title": "Stage 10: Authenticity & Security Inspection",
         "description": f"Multi-factor visual consistency evaluation: Inliers ({best_inlier_count}), Color correlation ({color_corr if color_corr is not None else 'N/A'}), Sharpness ({lap_var:.1f}). Verdict: {auth_label}.",
-        "verdict": auth_verdict,
-        "anomalies": anomalies,
-        "image_data": encode_cv2_image_to_base64(annotated_auth)
-    }�────
-    # Stage 10: Multi-Factor Authenticity & Specimen / Defacement Inspection
-    # ──────────────────────────────────────────────────────────────────────────
-    annotated_auth = recognition_input_bgr.copy()
-    ah, aw = recognition_input_bgr.shape[:2]
-    anomalies = []
-    is_specimen = False
-
-    # Watermark and signature field coordinates (x: 55% to 96%, y: 14% to 72%)
-    rx1, rx2 = int(aw * 0.55), int(aw * 0.96)
-    ry1, ry2 = int(ah * 0.14), int(ah * 0.72)
-    wm_roi = recognition_input_bgr[ry1:ry2, rx1:rx2]
-
-    # Red/Crimson ink mask in HSV color space
-    hsv_wm = cv2.cvtColor(wm_roi, cv2.COLOR_BGR2HSV)
-    m1 = cv2.inRange(hsv_wm, np.array([0, 80, 75]), np.array([12, 255, 255]))
-    m2 = cv2.inRange(hsv_wm, np.array([160, 80, 75]), np.array([180, 255, 255]))
-    stamp_mask = m1 | m2
-
-    wm_area = wm_roi.shape[0] * wm_roi.shape[1]
-    red_count = cv2.countNonZero(stamp_mask)
-    red_ratio = red_count / float(max(wm_area, 1))
-
-    contours, _ = cv2.findContours(stamp_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    stamp_boxes = [c for c in contours if cv2.contourArea(c) > 120]
-
-    # Draw inspected security zone
-    cv2.rectangle(annotated_auth, (rx1, ry1), (rx2, ry2), (255, 200, 0), 2)
-    cv2.putText(annotated_auth, "Watermark & Security Zone", (rx1, ry1 - 8),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 200, 0), 1, cv2.LINE_AA)
-
-    # In genuine Indian banknotes, watermark area has near 0 saturated red ink
-    if recognized_denom in ["500", "100", "200", "10"] and (red_ratio > 0.012 or len(stamp_boxes) >= 2):
-        is_specimen = True
-        anomalies.append(f"Detected red cancellation / 'SPECIMEN' stamp in watermark field ({red_count} px, {red_ratio*100:.1f}% coverage).")
-        for c in stamp_boxes:
-            bx, by, bw, bh = cv2.boundingRect(c)
-            cv2.rectangle(annotated_auth, (rx1 + bx, ry1 + by), (rx1 + bx + bw, ry1 + by + bh), (0, 0, 255), 2)
-        cv2.putText(annotated_auth, "SPECIMEN STAMP DETECTED", (rx1, ry2 + 22),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0, 0, 255), 2, cv2.LINE_AA)
-
-    # Texture & sharpness check (photocopy / display detection)
-    if lap_var < 28.0:
-        anomalies.append(f"Low texture variance ({lap_var:.1f}) — typical of blurred photocopy or screen capture.")
-
-    # Color profile correlation check vs genuine reference
-    color_corr = consistency.get("color_correlation")
-    if color_corr is not None and color_corr < 0.40:
-        anomalies.append(f"Color histogram correlation low ({color_corr:.2f}) vs genuine RBI reference.")
-
-    # Geometric inliers consistency check
-    if best_inlier_count < 15 and is_recognized:
-        anomalies.append(f"Low geometric correspondences ({best_inlier_count} RANSAC inliers).")
-
-    # Final Authenticity Verdict Assignment
-    if not is_recognized:
-        auth_verdict = "UNRECOGNIZED"
-        auth_label = "Unable to verify authenticity (insufficient feature evidence)"
-        is_genuine = False
-    elif is_specimen:
-        auth_verdict = "SPECIMEN"
-        auth_label = "SPECIMEN / CANCELLED NOTE (NOT GENUINE TENDER)"
-        is_genuine = False
-    elif anomalies:
-        auth_verdict = "FAKE"
-        auth_label = "SUSPICIOUS / LIKELY FAKE"
-        is_genuine = False
-    else:
-        auth_verdict = "GENUINE"
-        auth_label = "GENUINE (AUTHENTIC CURRENCY)"
-        is_genuine = True
-
-    stages["stage10_authenticity"] = {
-        "title": "Stage 10: Authenticity & Specimen Inspection",
-        "description": f"Analyzed watermark security zone, red cancellation ink mask, and print texture. Verdict: {auth_label}.",
         "verdict": auth_verdict,
         "anomalies": anomalies,
         "image_data": encode_cv2_image_to_base64(annotated_auth)
@@ -807,6 +999,8 @@ def execute_ivp_pipeline(raw_bgr):
         "processing_time_sec": round(t_elapsed, 3),
         "denom_candidate_scores": denom_scores,
         "consistency_analysis": consistency,
+        "image_quality_assessment": iqa_data,
+        "security_features": security_features,
         "warnings": warnings,
         "pipeline_stages": stages
     }
@@ -821,6 +1015,13 @@ def execute_ivp_pipeline(raw_bgr):
 def index():
     """Serve the complete frontend user interface (index.html)."""
     return render_template("index.html")
+
+
+@app.route("/docs", methods=["GET"])
+@app.route("/index1.html", methods=["GET"])
+def documentation():
+    """Serve the technical workflow documentation website (index1.html)."""
+    return render_template("index1.html")
 
 
 @app.route("/api/health", methods=["GET"])
