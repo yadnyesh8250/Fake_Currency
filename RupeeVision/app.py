@@ -187,6 +187,10 @@ def load_reference_dataset(max_images_per_denom=15):
 
     print(f"[INFO] Loaded reference dataset: {total_loaded} high-quality templates across {len(DATASET_CACHE)} denominations.")
 
+# Auto-load reference templates on import (ensures gunicorn and cloud runtimes have dataset ready)
+if not DATASET_CACHE:
+    load_reference_dataset()
+
 
 ################################################################################
 # /// SECTION 4: IMAGE GEOMETRY & PERSPECTIVE WARP UTILITIES ///
@@ -1092,9 +1096,9 @@ if __name__ == "__main__":
     print("=" * 65)
     print("  RupeeVision — Indian Currency Recognition & IVP Analysis")
     print("=" * 65)
-    # Pre-cache genuine reference note features in RAM
-    load_reference_dataset()
-    print("\n[INFO] Starting local Flask development server...")
-    print("[INFO] Open your web browser at: http://127.0.0.1:5050\n")
-    # Launch local web server on port 5050 (avoids macOS AirPlay port 5000 conflict)
-    app.run(host="127.0.0.1", port=5050, debug=False)
+    if not DATASET_CACHE:
+        load_reference_dataset()
+    port = int(os.environ.get("PORT", 5050))
+    print(f"\n[INFO] Starting server on port {port}...")
+    print(f"[INFO] Access console at: http://127.0.0.1:{port}\n")
+    app.run(host="0.0.0.0", port=port, debug=False)
